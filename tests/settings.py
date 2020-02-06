@@ -6,6 +6,8 @@ DATABASES = {
         'ENGINE': 'django.db.backends.{engine}'.format(
             engine=os.environ.get('DB_ENGINE', 'sqlite3')
          ),
+        'HOST': os.environ.get('DB_HOST', ''),
+        'PORT': os.environ.get('DB_PORT', ''),
         'NAME': os.environ.get('DB_NAME', 'jsonfield'),
         'USER': os.environ.get('DB_USER', ''),
         'PASSWORD': os.environ.get('DB_PASSWORD', ''),

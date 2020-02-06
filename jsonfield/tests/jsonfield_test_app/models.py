@@ -1,5 +1,5 @@
-from django.contrib.postgres.fields import JSONField as PostgresJSONField
-from django.db import models
+from django.db import models, connection
+
 from jsonfield.fields import JSONField
 
 
@@ -32,10 +32,13 @@ class CallableDefaultModel(models.Model):
         app_label = 'jsonfield'
 
 
-class PostgresParallelModel(models.Model):
-    library_json = JSONField()
-    postgres_text_json = JSONField(db_json_type='text')
-    postgres_json = PostgresJSONField()
+if connection.vendor == 'postgresql':
+    from django.contrib.postgres.fields import JSONField as PostgresJSONField
 
-    class Meta:
-        app_label = 'jsonfield'
+    class PostgresParallelModel(models.Model):
+        library_json = JSONField()
+        postgres_text_json = JSONField(db_json_type='text')
+        postgres_json = PostgresJSONField()
+
+        class Meta:
+            app_label = 'jsonfield'

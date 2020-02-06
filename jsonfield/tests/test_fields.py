@@ -9,7 +9,6 @@ from django import forms
 from jsonfield.tests.jsonfield_test_app.models import (
     JSONFieldTestModel, JSONFieldWithDefaultTestModel,
     BlankJSONFieldTestModel, CallableDefaultModel,
-    PostgresParallelModel
 )
 
 from jsonfield.fields import JSONField
@@ -209,6 +208,8 @@ class JSONFieldTest(DjangoTestCase):
 
     @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL-specific test')
     def test_work_parallel_with_postgres_json_field(self):
+        from .jsonfield_test_app.models import PostgresParallelModel
+
         data = {'foo': 'bar'}
         obj = PostgresParallelModel.objects.create(
             library_json=data, postgres_text_json=data, postgres_json=data)
