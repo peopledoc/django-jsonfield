@@ -1,0 +1,29 @@
+dist: bionic
+language: python
+
+python:
+  - 2.7
+  - 3.6
+  - 3.7
+  - 3.8
+
+stages:
+  - lint
+  - tests
+
+env:
+  - DATABASE=postgres
+  - DATABASE=mysql
+  - DATABASE=sqlite
+
+jobs:
+  include:
+    - stage: lint
+      python: 3.6
+      env: TOXENV=flake8
+
+install:
+  - pip install tox
+  - pip install -q tox-travis
+script:
+  - tox

@@ -6,7 +6,12 @@ from django.test import TestCase as DjangoTestCase
 from django.utils.encoding import force_text
 from django import forms
 
-from jsonfield.tests.jsonfield_test_app.models import *  # NOQA
+from jsonfield.tests.jsonfield_test_app.models import (
+    JSONFieldTestModel, JSONFieldWithDefaultTestModel,
+    BlankJSONFieldTestModel, CallableDefaultModel,
+    PostgresParallelModel
+)
+
 from jsonfield.fields import JSONField
 
 
