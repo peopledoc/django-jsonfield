@@ -1,13 +1,11 @@
 from __future__ import unicode_literals
+import copy
 import json
 
-import django
-from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.db import models
 from django.db.models.lookups import Exact, IExact, In, Contains, IContains
 from django.utils.translation import ugettext_lazy as _
-import six
 
 from .utils import _resolve_object_path
 from .widgets import JSONWidget
@@ -18,26 +16,47 @@ class JSONField(models.Field):
     """
     A field that will ensure the data entered into it is valid JSON.
     """
+    empty_strings_allowed = False
     default_error_messages = {
         'invalid': _("'%s' is not a valid JSON string.")
     }
     description = "JSON object"
 
     def __init__(self, *args, **kwargs):
-        if not kwargs.get('null', False):
-            kwargs['default'] = kwargs.get('default', dict)
         self.encoder_kwargs = {
-            'indent': kwargs.pop('indent', getattr(settings, 'JSONFIELD_INDENT', None)),
+            'indent': kwargs.pop(
+                'indent', getattr(settings, 'JSONFIELD_INDENT', None)),
         }
-        # This can be an object (probably a class), or a path which can be imported, resulting
-        # in an object.
-        encoder_class = kwargs.pop('encoder_class', getattr(settings, 'JSONFIELD_ENCODER_CLASS', None))
+        self.db_json_type = kwargs.pop('db_json_type', None)
+        # This can be an object (probably a class), or a path which can be
+        # imported, resulting in an object.
+        encoder_class = kwargs.pop(
+            'encoder_class',
+            getattr(settings, 'JSONFIELD_ENCODER_CLASS', None))
         if encoder_class:
             self.encoder_kwargs['cls'] = _resolve_object_path(encoder_class)
 
-        self.decoder_kwargs = dict(kwargs.pop('decoder_kwargs', getattr(settings, 'JSONFIELD_DECODER_KWARGS', {})))
+        self.decoder_kwargs = dict(kwargs.pop(
+            'decoder_kwargs',
+            getattr(settings, 'JSONFIELD_DECODER_KWARGS', {})))
         super(JSONField, self).__init__(*args, **kwargs)
-        self.validate(self.get_default(), None)
+
+    def default_db_type(self, connection):
+        if connection.vendor == 'postgresql':
+            return 'jsonb'
+        if connection.vendor == 'mysql':
+            return 'longtext'
+        if connection.vendor == 'oracle':
+            return 'long'
+        return 'text'
+
+    def get_default(self):
+        if self.has_default():
+            if callable(self.default):
+                return self.default()
+            return copy.deepcopy(self.default)
+
+        return super(JSONField, self).get_default()
 
     def formfield(self, **kwargs):
         defaults = {
@@ -47,53 +66,16 @@ class JSONField(models.Field):
         defaults.update(**kwargs)
         return super(JSONField, self).formfield(**defaults)
 
-    def validate(self, value, model_instance):
-        if not self.null and value is None:
-            raise ValidationError(self.error_messages['null'])
-        try:
-            self.get_prep_value(value)
-        except ValueError:
-            raise ValidationError(self.error_messages['invalid'] % value)
-
-    def get_default(self):
-        if self.has_default():
-            default = self.default
-            if callable(default):
-                default = default()
-            if isinstance(default, six.string_types):
-                return json.loads(default, **self.decoder_kwargs)
-            return json.loads(json.dumps(default, **self.encoder_kwargs), **self.decoder_kwargs)
-        return super(JSONField, self).get_default()
-
     def get_internal_type(self):
         return 'TextField'
 
     def db_type(self, connection):
-        if connection.vendor == 'postgresql':
-            # Only do jsonb if in pg 9.4+
-            if connection.pg_version >= 90400:
-                return 'jsonb'
-            return 'text'
-        if connection.vendor == 'mysql':
-            return 'longtext'
-        if connection.vendor == 'oracle':
-            return 'long'
-        return 'text'
+        return self.db_json_type or self.default_db_type(connection)
 
-    if django.VERSION > (2, 0):
-        def from_db_value(self, value, expression, connection):
-            if value is None:
-                return None
-            elif connection.vendor == 'postgresql' and self.decoder_kwargs.get('cls') is None:
-                return value
-            return json.loads(value, **self.decoder_kwargs)
-    else:
-        def from_db_value(self, value, expression, connection, context):
-            if value is None:
-                return None
-            elif connection.vendor == 'postgresql' and self.decoder_kwargs.get('cls') is None:
-                return value
-            return json.loads(value, **self.decoder_kwargs)
+    def from_db_value(self, value, expression, connection, context=None):
+        if value is None or self.db_type(connection) == 'jsonb':
+            return value
+        return json.loads(value, **self.decoder_kwargs)
 
     def get_db_prep_value(self, value, connection=None, prepared=None):
         return self.get_prep_value(value)
@@ -104,12 +86,6 @@ class JSONField(models.Field):
                 return ""
             return None
         return json.dumps(value, **self.encoder_kwargs)
-
-    def select_format(self, compiler, sql, params):
-        if compiler.connection.vendor == 'postgresql' and self.decoder_kwargs.get('cls') is not None:
-            # Avoid psycopg2's automatic decoding to allow custom decoder
-            return '%s::text' % sql, params
-        return super(JSONField, self).select_format(compiler, sql, params)
 
     def value_to_string(self, obj):
         return self.value_from_object(obj)
