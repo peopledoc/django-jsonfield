@@ -204,7 +204,7 @@ class JSONFieldTest(DjangoTestCase):
     def test_serializing(self):
         JSONFieldTestModel.objects.create(json='["foo"]')
         serialized = serializers.serialize(
-            "json",JSONFieldTestModel.objects.all())
+            "json", JSONFieldTestModel.objects.all())
         self.assertIn('"json": "[\\"foo\\"]"', serialized)
 
     @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL-specific test')

@@ -28,4 +28,5 @@ class JSONFormField(forms.CharField):
     def validate(self, value):
         # This is required in older django versions.
         if value in self.empty_values and self.required:
-            raise forms.ValidationError(self.error_messages['required'], code='required')
+            raise forms.ValidationError(
+                self.error_messages['required'], code='required')
