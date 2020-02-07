@@ -33,12 +33,22 @@ class CallableDefaultModel(models.Model):
 
 
 if connection.vendor == 'postgresql':
-    from django.contrib.postgres.fields import JSONField as PostgresJSONField
+    from django.contrib.postgres.fields import JSONField as DjangoJSONField
 
-    class PostgresParallelModel(models.Model):
-        library_json = JSONField()
-        postgres_text_json = JSONField(db_json_type='text')
-        postgres_json = PostgresJSONField()
+    class PostgresJSONFieldTestModel(models.Model):
+        json_as_jsonb = JSONField()
+        json_as_text = JSONField(db_json_type='text')
+        json_as_json = JSONField(db_json_type='json')
+        django_json = DjangoJSONField()
+
+        class Meta:
+            app_label = 'jsonfield'
+
+    class BlankPostgresJSONFieldTestModel(models.Model):
+        json_as_jsonb = JSONField(null=True)
+        json_as_text = JSONField(null=True, db_json_type='text')
+        json_as_json = JSONField(null=True, db_json_type='json')
+        django_json = DjangoJSONField(null=True)
 
         class Meta:
             app_label = 'jsonfield'

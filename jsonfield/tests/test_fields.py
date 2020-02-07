@@ -48,7 +48,7 @@ class JSONFieldTest(DjangoTestCase):
     def test_db_prep_save(self):
         field = JSONField("test")
         field.set_attributes_from_name("json")
-        self.assertEqual(None, field.get_db_prep_save(None, connection=None))
+        self.assertEqual('null', field.get_db_prep_save(None, connection=None))
         self.assertEqual(
             '{"spam": "eggs"}',
             field.get_db_prep_save({"spam": "eggs"}, connection=None))
@@ -206,15 +206,59 @@ class JSONFieldTest(DjangoTestCase):
             "json", JSONFieldTestModel.objects.all())
         self.assertIn('"json": "[\\"foo\\"]"', serialized)
 
-    @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL-specific test')
-    def test_work_parallel_with_postgres_json_field(self):
-        from .jsonfield_test_app.models import PostgresParallelModel
+
+@skipUnless(connection.vendor == 'postgresql', 'PostgreSQL-specific test')
+class PosgresJSONFieldTest(DjangoTestCase):
+    def test_postgres_json_field(self):
+        from .jsonfield_test_app.models import PostgresJSONFieldTestModel
 
         data = {'foo': 'bar'}
-        obj = PostgresParallelModel.objects.create(
-            library_json=data, postgres_text_json=data, postgres_json=data)
-        obj = PostgresParallelModel.objects.get(id=obj.id)
-        self.assertEqual(obj.library_json, obj.postgres_json)
+
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb=data,
+            json_as_text=data,
+            json_as_json=data,
+            django_json=data,
+        )
+
+        obj = PostgresJSONFieldTestModel.objects.get()
+        self.assertEqual(data, obj.json_as_jsonb)
+        self.assertEqual(data, obj.json_as_text)
+        self.assertEqual(data, obj.json_as_json)
+        self.assertEqual(data, obj.django_json)
+
+    def test_postgres_json_field_none(self):
+        from .jsonfield_test_app.models import PostgresJSONFieldTestModel
+
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb=None,
+            json_as_text=None,
+            json_as_json=None,
+            # django contrib jsonfield null=False behave correctly
+            django_json={},
+        )
+
+        obj = PostgresJSONFieldTestModel.objects.get()
+        self.assertIsNone(obj.json_as_jsonb)
+        self.assertIsNone(obj.json_as_text)
+        self.assertIsNone(obj.json_as_json)
+        self.assertEqual({}, obj.django_json)
+
+    def test_postgres_json_field_none_nullable(self):
+        from .jsonfield_test_app.models import BlankPostgresJSONFieldTestModel
+
+        BlankPostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb=None,
+            json_as_text=None,
+            json_as_json=None,
+            django_json=None,
+        )
+
+        obj = BlankPostgresJSONFieldTestModel.objects.get()
+        self.assertIsNone(obj.json_as_jsonb)
+        self.assertIsNone(obj.json_as_text)
+        self.assertIsNone(obj.json_as_json)
+        self.assertIsNone(obj.django_json)
 
 
 class SavingModelsTest(DjangoTestCase):

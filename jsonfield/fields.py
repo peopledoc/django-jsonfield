@@ -1,15 +1,17 @@
 from __future__ import unicode_literals
+
 import copy
 import json
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.lookups import Exact, IExact, In, Contains, IContains
 from django.utils.translation import ugettext_lazy as _
 
+from .forms import JSONFormField
 from .utils import _resolve_object_path
 from .widgets import JSONWidget
-from .forms import JSONFormField
 
 
 class JSONField(models.Field):
@@ -73,7 +75,7 @@ class JSONField(models.Field):
         return self.db_json_type or self.default_db_type(connection)
 
     def from_db_value(self, value, expression, connection, context=None):
-        if value is None or self.db_type(connection) == 'jsonb':
+        if value is None or self.db_type(connection) in ('json', 'jsonb'):
             return value
         return json.loads(value, **self.decoder_kwargs)
 
@@ -81,14 +83,19 @@ class JSONField(models.Field):
         return self.get_prep_value(value)
 
     def get_prep_value(self, value):
-        if value is None:
-            if not self.null and self.blank:
-                return ""
+        if self.null and value is None:
             return None
+
         return json.dumps(value, **self.encoder_kwargs)
 
     def value_to_string(self, obj):
         return self.value_from_object(obj)
+
+    def validate(self, value, model_instance):
+        if not self.null and value is None:
+            raise ValidationError('JSON value cannot be null')
+
+        return super(JSONField, self).validate(value, model_instance)
 
 
 class NoPrepareMixin(object):
