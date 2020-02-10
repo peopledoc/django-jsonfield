@@ -9,8 +9,9 @@ from django.db import models
 from django.db.models.lookups import Exact, IExact, In, Contains, IContains
 from django.utils.translation import ugettext_lazy as _
 
+from .encoder import JSONEncoder
 from .forms import JSONFormField
-from .utils import _resolve_object_path
+from .utils import resolve_object_from_path
 from .widgets import JSONWidget
 
 
@@ -20,28 +21,47 @@ class JSONField(models.Field):
     """
     empty_strings_allowed = False
     default_error_messages = {
-        'invalid': _("'%s' is not a valid JSON string.")
+        'invalid': _("Value must be valid JSON."),
     }
     description = "JSON object"
 
     def __init__(self, *args, **kwargs):
-        self.encoder_kwargs = {
-            'indent': kwargs.pop(
-                'indent', getattr(settings, 'JSONFIELD_INDENT', None)),
-        }
         self.db_json_type = kwargs.pop('db_json_type', None)
+
+        self.encoder_kwargs = self._encoder_kwargs(
+            indent=kwargs.pop('indent', None),
+            encoder_class=kwargs.pop('encoder_class', None)
+        )
+        self.decoder_kwargs = self._decoder_kwargs(
+            decoder_kwargs=kwargs.pop('decoder_kwargs', None)
+        )
+
+        super(JSONField, self).__init__(*args, **kwargs)
+
+    def _decoder_kwargs(self, decoder_kwargs=None):
+        kwargs = dict(getattr(settings, 'JSONFIELD_DECODER_KWARGS', {}))
+
+        if decoder_kwargs:
+            kwargs.update(decoder_kwargs)
+
+        return kwargs
+
+    def _encoder_kwargs(self, indent=None, encoder_class=None):
+        kwargs = {
+            'cls': getattr(settings, 'JSONFIELD_ENCODER_CLASS', JSONEncoder),
+            'indent': getattr(settings, 'JSONFIELD_INDENT', None),
+            'separators': (',', ':')
+        }
+
+        if indent:
+            kwargs['indent'] = indent
+
         # This can be an object (probably a class), or a path which can be
         # imported, resulting in an object.
-        encoder_class = kwargs.pop(
-            'encoder_class',
-            getattr(settings, 'JSONFIELD_ENCODER_CLASS', None))
         if encoder_class:
-            self.encoder_kwargs['cls'] = _resolve_object_path(encoder_class)
+            kwargs['cls'] = resolve_object_from_path(encoder_class)
 
-        self.decoder_kwargs = dict(kwargs.pop(
-            'decoder_kwargs',
-            getattr(settings, 'JSONFIELD_DECODER_KWARGS', {})))
-        super(JSONField, self).__init__(*args, **kwargs)
+        return kwargs
 
     def default_db_type(self, connection):
         if connection.vendor == 'postgresql':
@@ -86,14 +106,25 @@ class JSONField(models.Field):
         if self.null and value is None:
             return None
 
-        return json.dumps(value, **self.encoder_kwargs)
+        try:
+            return json.dumps(value, **self.encoder_kwargs)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                self.error_messages['invalid'],
+                code='invalid',
+                params={'value': value}
+            )
 
     def value_to_string(self, obj):
         return self.value_from_object(obj)
 
     def validate(self, value, model_instance):
         if not self.null and value is None:
-            raise ValidationError('JSON value cannot be null')
+            raise ValidationError(
+                self.error_messages['null'],
+                code='invalid',
+                params={'value': value}
+            )
 
         return super(JSONField, self).validate(value, model_instance)
 
@@ -116,14 +147,18 @@ class JSONFieldInLookup(NoPrepareMixin, In):
 
 
 class ContainsLookupMixin(object):
-    def get_prep_lookup(self):
-        if isinstance(self.rhs, (list, tuple)):
-            raise TypeError("Lookup type %r not supported with %s argument" % (
-                self.lookup_name, type(self.rhs).__name__
+    def get_db_prep_lookup(self, value, connection):
+        # jsonb field uses ', ' & ': ' separators natively. So we need to
+        # conform to this when serializing the argument.
+        if connection.vendor == 'postgresql':
+            value = json.dumps(value, **dict(
+                self.lhs.output_field.encoder_kwargs,
+                separators=(', ', ': ')
             ))
-        if isinstance(self.rhs, dict):
-            return self.lhs.output_field.get_prep_value(self.rhs)[1:-1]
-        return self.lhs.output_field.get_prep_value(self.rhs)
+        else:
+            value = self.lhs.output_field.get_db_prep_value(value)
+
+        return ('%s', [value.strip('{}')])
 
 
 class JSONFieldContainsLookup(ContainsLookupMixin, Contains):
@@ -139,41 +174,3 @@ JSONField.register_lookup(JSONFieldIExactLookup)
 JSONField.register_lookup(JSONFieldInLookup)
 JSONField.register_lookup(JSONFieldContainsLookup)
 JSONField.register_lookup(JSONFieldIContainsLookup)
-
-
-class TypedJSONField(JSONField):
-    """
-
-    """
-    def __init__(self, *args, **kwargs):
-        self.json_required_fields = kwargs.pop('required_fields', {})
-        self.json_validators = kwargs.pop('validators', [])
-
-        super(TypedJSONField, self).__init__(*args, **kwargs)
-
-    def cast_required_fields(self, obj):
-        if not obj:
-            return
-        for field_name, field_type in self.json_required_fields.items():
-            obj[field_name] = field_type.to_python(obj[field_name])
-
-    def to_python(self, value):
-        value = super(TypedJSONField, self).to_python(value)
-
-        if isinstance(value, list):
-            for item in value:
-                self.cast_required_fields(item)
-        else:
-            self.cast_required_fields(value)
-
-        return value
-
-    def validate(self, value, model_instance):
-        super(TypedJSONField, self).validate(value, model_instance)
-
-        for v in self.json_validators:
-            if isinstance(value, list):
-                for item in value:
-                    v(item)
-            else:
-                v(value)

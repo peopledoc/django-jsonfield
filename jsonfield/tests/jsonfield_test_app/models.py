@@ -1,5 +1,7 @@
-from django.db import models, connection
+from decimal import Decimal
 
+from django.db import models, connection
+from jsonfield.encoder import JSONEncoder
 from jsonfield.fields import JSONField
 
 
@@ -30,6 +32,19 @@ class CallableDefaultModel(models.Model):
 
     class Meta:
         app_label = 'jsonfield'
+
+
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            raise Exception('Decimal are not allowed !')
+
+
+class CustomEncoderModel(models.Model):
+    json = JSONField(encoder_class=CustomJSONEncoder)
+    json_from_path = JSONField(
+        encoder_class='jsonfield.tests.jsonfield_test_app.models.CustomJSONEncoder'  # noqa
+    )
 
 
 if connection.vendor == 'postgresql':

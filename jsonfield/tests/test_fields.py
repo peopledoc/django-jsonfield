@@ -1,17 +1,29 @@
+import uuid
+
+from datetime import datetime, time, timedelta
+from decimal import Decimal
 from unittest import skipUnless
 
-from django.db import connection
+from django import forms
 from django.core import serializers
+from django.core.exceptions import ValidationError
+from django.db import connection, models
 from django.test import TestCase as DjangoTestCase
 from django.utils.encoding import force_text
-from django import forms
+from django.utils.functional import Promise
+from django.utils.timezone import make_aware, is_aware
+from django.utils.translation import ugettext_lazy
 
+from jsonfield.fields import JSONField
 from jsonfield.tests.jsonfield_test_app.models import (
     JSONFieldTestModel, JSONFieldWithDefaultTestModel,
     BlankJSONFieldTestModel, CallableDefaultModel,
+    CustomEncoderModel,
 )
+from jsonfield.utils import PY3
 
-from jsonfield.fields import JSONField
+if PY3:
+    from datetime import timezone
 
 
 class JSONFieldTest(DjangoTestCase):
@@ -27,30 +39,12 @@ class JSONFieldTest(DjangoTestCase):
         obj = JSONFieldTestModel(json=None)
         self.assertEqual(obj.json, None)
 
-    def test_json_field_save(self):
-        JSONFieldTestModel.objects.create(
-            id=10,
-            json={'spam': 'eggs'},
-        )
-        obj2 = JSONFieldTestModel.objects.get(id=10)
-        self.assertEqual(obj2.json, {'spam': 'eggs'})
-
-    def test_json_field_save_empty(self):
-        JSONFieldTestModel.objects.create(id=10, json='')
-        obj2 = JSONFieldTestModel.objects.get(id=10)
-        self.assertEqual(obj2.json, '')
-
-    def test_json_field_save_null(self):
-        JSONFieldTestModel.objects.create(id=10, json=None)
-        obj2 = JSONFieldTestModel.objects.get(id=10)
-        self.assertEqual(obj2.json, None)
-
     def test_db_prep_save(self):
         field = JSONField("test")
         field.set_attributes_from_name("json")
         self.assertEqual('null', field.get_db_prep_save(None, connection=None))
         self.assertEqual(
-            '{"spam": "eggs"}',
+            '{"spam":"eggs"}',
             field.get_db_prep_save({"spam": "eggs"}, connection=None))
 
     def test_default_db_type(self):
@@ -127,7 +121,7 @@ class JSONFieldTest(DjangoTestCase):
         field = JSONField()
         self.assertEqual(field.get_default(), None)
 
-    def test_query_object(self):
+    def test_query_equals(self):
         JSONFieldTestModel.objects.create(json={})
         JSONFieldTestModel.objects.create(json={'foo': 'bar'})
         self.assertEqual(2, JSONFieldTestModel.objects.all().count())
@@ -137,6 +131,11 @@ class JSONFieldTest(DjangoTestCase):
             1, JSONFieldTestModel.objects.filter(json={}).count())
         self.assertEqual(
             1, JSONFieldTestModel.objects.filter(json={'foo': 'bar'}).count())
+
+    def test_query_contains(self):
+        JSONFieldTestModel.objects.create(json={})
+        JSONFieldTestModel.objects.create(json={'foo': 'bar'})
+        JSONFieldTestModel.objects.create(json={'foo': ['bar', 'baz']})
         self.assertEqual(
             1, JSONFieldTestModel.objects.filter(
                 json__contains={'foo': 'bar'}).count())
@@ -149,13 +148,11 @@ class JSONFieldTest(DjangoTestCase):
         # self.assertEqual(
         #     1, JSONFieldTestModel.objects.filter(
         #         json__contains={'baz':'bing', 'foo':'bar'}).count())
-        self.assertEqual(2, JSONFieldTestModel.objects.filter(
+        self.assertEqual(3, JSONFieldTestModel.objects.filter(
             json__contains='foo').count())
-        # This code needs to be implemented!
-        self.assertRaises(
-            TypeError,
-            lambda: JSONFieldTestModel.objects.filter(
-                json__contains=['baz', 'foo']))
+
+        self.assertEqual(1, JSONFieldTestModel.objects.filter(
+            json__contains=['bar', 'baz']).count())
 
     def test_query_isnull(self):
         JSONFieldTestModel.objects.create(json=None)
@@ -207,9 +204,147 @@ class JSONFieldTest(DjangoTestCase):
         self.assertIn('"json": "[\\"foo\\"]"', serialized)
 
 
+class JSONFieldSaveTest(DjangoTestCase):
+    def test_string(self):
+        """Test saving an ordinary Python string in our JSONField"""
+        json_obj = 'blah blah'
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        self.assertEqual(new_obj.json, json_obj)
+
+    def test_float(self):
+        """Test saving a Python float in our JSONField"""
+        json_obj = 1.23
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        self.assertEqual(new_obj.json, json_obj)
+
+    def test_int(self):
+        """Test saving a Python integer in our JSONField"""
+        json_obj = 1234567
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        self.assertEqual(new_obj.json, json_obj)
+
+    def test_decimal(self):
+        """Test saving a Python Decimal in our JSONField"""
+        json_obj = Decimal(12.34)
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        # here we must know to convert the returned string back to Decimal,
+        # since json does not support that format
+        self.assertEqual(Decimal(new_obj.json), json_obj)
+
+    def test_uuid(self):
+        """Test saving a Python uuid in our JSONField"""
+        json_obj = uuid.uuid4()
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        # here we must know to convert the returned string back to Decimal,
+        # since json does not support that format
+        self.assertEqual(force_text(new_obj.json), force_text(json_obj))
+
+    def test_unserializable(self):
+        def unserializable():
+            pass
+
+        with self.assertRaises(ValidationError):
+            JSONFieldTestModel.objects.create(json=unserializable)
+
+    def test_dict(self):
+        json_obj = {'spam': 'eggs'}
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        self.assertEqual(new_obj.json, json_obj)
+
+    def test_list(self):
+        """Test storing a JSON list"""
+        json_obj = ["my", "list", "of", 1, "objs", {"hello": "there"}]
+
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+        self.assertEqual(new_obj.json, json_obj)
+
+    def test_aware_datetime(self):
+        json_obj = make_aware(datetime.now())
+
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+        self.assertEqual(new_obj.json,
+                         json_obj.isoformat()[:23] + json_obj.isoformat()[26:])
+
+    @skipUnless(PY3, 'Only works with python 3.x')
+    def test_aware_time(self):
+        tz = timezone(timedelta(hours=-5), 'EST')
+        json_obj = time(tzinfo=tz)
+
+        self.assertTrue(is_aware(json_obj))
+
+        with self.assertRaises(ValidationError):
+            JSONFieldTestModel.objects.create(json=json_obj)
+
+    def test_promise(self):
+        json_obj = ugettext_lazy('This is a test')
+        self.assertTrue(isinstance(json_obj, Promise))
+
+        obj = JSONFieldTestModel.objects.create(json=json_obj)
+        new_obj = JSONFieldTestModel.objects.get(id=obj.id)
+
+        self.assertEqual(new_obj.json, force_text(json_obj))
+
+    def test_empty_string(self):
+        JSONFieldTestModel.objects.create(id=10, json='')
+        obj2 = JSONFieldTestModel.objects.get(id=10)
+        self.assertEqual(obj2.json, '')
+
+    def test_null(self):
+        JSONFieldTestModel.objects.create(id=10, json=None)
+        obj2 = JSONFieldTestModel.objects.get(id=10)
+        self.assertEqual(obj2.json, None)
+
+    def test_saving_null(self):
+        obj = BlankJSONFieldTestModel.objects.create(
+            blank_json='', null_json=None)
+        self.assertEqual('', obj.blank_json)
+        self.assertEqual(None, obj.null_json)
+
+    def test_custom_encoder(self):
+        CustomEncoderModel.objects.create(json=10)
+        CustomEncoderModel.objects.create(json_from_path=10)
+
+        with self.assertRaises(Exception) as e:
+            CustomEncoderModel.objects.create(json=Decimal(10))
+
+        self.assertEqual(str(e.exception), 'Decimal are not allowed !')
+
+        with self.assertRaises(Exception) as e:
+            CustomEncoderModel.objects.create(json_from_path=Decimal(10))
+
+        self.assertEqual(str(e.exception), 'Decimal are not allowed !')
+
+    def test_custom_encoder_from_invalid_path(self):
+        with self.assertRaises(ImportError):
+            class InvalidModuleEncoderFieldTestModel(models.Model):
+                json = JSONField(
+                    encoder_class='unknown_module.UnknownJSONEncoder'
+                )
+
+        with self.assertRaises(ImportError):
+            class InvalidEncoderFieldTestModel(models.Model):
+                json = JSONField(
+                    encoder_class='jsonfield.encoder.UnknownJSONEncoder'
+                )
+
+
 @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL-specific test')
 class PosgresJSONFieldTest(DjangoTestCase):
-    def test_postgres_json_field(self):
+    def test_dict(self):
         from .jsonfield_test_app.models import PostgresJSONFieldTestModel
 
         data = {'foo': 'bar'}
@@ -227,7 +362,7 @@ class PosgresJSONFieldTest(DjangoTestCase):
         self.assertEqual(data, obj.json_as_json)
         self.assertEqual(data, obj.django_json)
 
-    def test_postgres_json_field_none(self):
+    def test_none(self):
         from .jsonfield_test_app.models import PostgresJSONFieldTestModel
 
         PostgresJSONFieldTestModel.objects.create(
@@ -244,7 +379,7 @@ class PosgresJSONFieldTest(DjangoTestCase):
         self.assertIsNone(obj.json_as_json)
         self.assertEqual({}, obj.django_json)
 
-    def test_postgres_json_field_none_nullable(self):
+    def test_none_not_nullable(self):
         from .jsonfield_test_app.models import BlankPostgresJSONFieldTestModel
 
         BlankPostgresJSONFieldTestModel.objects.create(
@@ -259,11 +394,3 @@ class PosgresJSONFieldTest(DjangoTestCase):
         self.assertIsNone(obj.json_as_text)
         self.assertIsNone(obj.json_as_json)
         self.assertIsNone(obj.django_json)
-
-
-class SavingModelsTest(DjangoTestCase):
-    def test_saving_null(self):
-        obj = BlankJSONFieldTestModel.objects.create(
-            blank_json='', null_json=None)
-        self.assertEqual('', obj.blank_json)
-        self.assertEqual(None, obj.null_json)
