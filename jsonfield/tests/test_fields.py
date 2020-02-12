@@ -394,3 +394,72 @@ class PosgresJSONFieldTest(DjangoTestCase):
         self.assertIsNone(obj.json_as_text)
         self.assertIsNone(obj.json_as_json)
         self.assertIsNone(obj.django_json)
+
+    def test_query_contains(self):
+        from .jsonfield_test_app.models import PostgresJSONFieldTestModel
+
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb={},
+            json_as_text={},
+            json_as_json={},
+            django_json={},
+        )
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb={'foo': 'bar'},
+            json_as_text={'foo': 'bar'},
+            json_as_json={'foo': 'bar'},
+            django_json={},
+        )
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb={'foo': ['bar', 'baz']},
+            json_as_text={'foo': ['bar', 'baz']},
+            json_as_json={'foo': ['bar', 'baz']},
+            django_json={},
+        )
+
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_jsonb__contains={'foo': 'bar'}).count())
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_text__contains={'foo': 'bar'}).count())
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_json__contains={'foo': 'bar'}).count())
+
+        PostgresJSONFieldTestModel.objects.create(
+            json_as_jsonb={'foo': 'bar', 'baz': 'bing'},
+            json_as_text={'foo': 'bar', 'baz': 'bing'},
+            json_as_json={'foo': 'bar', 'baz': 'bing'},
+            django_json={},
+        )
+
+        self.assertEqual(
+            2, PostgresJSONFieldTestModel.objects.filter(
+                json_as_jsonb__contains={'foo': 'bar'}).count())
+        self.assertEqual(
+            2, PostgresJSONFieldTestModel.objects.filter(
+                json_as_text__contains={'foo': 'bar'}).count())
+        self.assertEqual(
+            2, PostgresJSONFieldTestModel.objects.filter(
+                json_as_json__contains={'foo': 'bar'}).count())
+
+        self.assertEqual(
+            3, PostgresJSONFieldTestModel.objects.filter(
+                json_as_jsonb__contains='foo').count())
+        self.assertEqual(
+            3, PostgresJSONFieldTestModel.objects.filter(
+                json_as_text__contains='foo').count())
+        self.assertEqual(
+            3, PostgresJSONFieldTestModel.objects.filter(
+                json_as_json__contains='foo').count())
+
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_jsonb__contains=['bar', 'baz']).count())
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_text__contains=['bar', 'baz']).count())
+        self.assertEqual(
+            1, PostgresJSONFieldTestModel.objects.filter(
+                json_as_json__contains=['bar', 'baz']).count())

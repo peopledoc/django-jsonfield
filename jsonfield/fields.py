@@ -150,7 +150,7 @@ class ContainsLookupMixin(object):
     def get_db_prep_lookup(self, value, connection):
         # jsonb field uses ', ' & ': ' separators natively. So we need to
         # conform to this when serializing the argument.
-        if connection.vendor == 'postgresql':
+        if self.lhs.output_field.db_type(connection) == 'jsonb':
             value = json.dumps(value, **dict(
                 self.lhs.output_field.encoder_kwargs,
                 separators=(', ', ': ')
