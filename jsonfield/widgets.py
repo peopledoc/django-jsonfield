@@ -1,24 +1,18 @@
 import json
 
-import django
-from django import forms
-import six
+from django.forms import Textarea
 
-from .utils import default
+from jsonfield.encoder import JSONEncoder
+from jsonfield.utils import string_types
 
 
-class JSONWidget(forms.Textarea):
-    def render(self, name, value, attrs=None, renderer=None):
+class JSONWidget(Textarea):
+    def format_value(self, value):
         if value is None:
-            value = ""
-        if not isinstance(value, six.string_types):
-            value = json.dumps(value, ensure_ascii=False, indent=2,
-                               default=default)
-        if django.VERSION < (2, 0):
-            return super(JSONWidget, self).render(name, value, attrs)
+            return ''
 
-        return super(JSONWidget, self).render(name, value, attrs, renderer)
+        if not isinstance(value, string_types):
+            return json.dumps(value, ensure_ascii=False, indent=2,
+                              cls=JSONEncoder)
 
-
-class JSONSelectWidget(forms.SelectMultiple):
-    pass
+        return value
