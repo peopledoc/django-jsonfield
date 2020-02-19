@@ -13,11 +13,10 @@ setup(
     version=version,
     description="JSONField for django models",
     long_description=long_description,
-    url="https://github.com/adamchainz/django-jsonfield",
+    url="https://github.com/peopledoc/django-jsonfield.git",
     author="Matthew Schinckel",
     author_email="matt@schinckel.net",
-    maintainer="Adam Johnson",
-    maintainer_email="me@adamj.eu",
+    maintainer="PeopleDoc",
     packages=[
         "jsonfield",
     ],
